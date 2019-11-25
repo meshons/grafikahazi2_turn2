@@ -64,10 +64,157 @@ const char * const fragmentSource = R"(
 	}
 )";
 
-GPUProgram gpuProgram; // vertex and fragment shaders
+GPUProgram gpuProgram;
+
+class Camera {
+    vec3 eye, lookat, right, up;
+    float fov;
+public:
+    void set(vec3 _eye, vec3 _lookat, vec3 vup, float _fov) {
+        eye = _eye;
+        lookat = _lookat;
+        vec3 w = eye - lookat;
+        fov = _fov;
+        float f = length(w);
+        right = normalize(cross(vup, w)) * f * tan(fov / 2);
+        up = normalize(cross(w, right)) * f * tan(fov / 2);
+    }
+    void setUniform() {
+        gpuProgram.setUniform(eye, "wEye");
+        gpuProgram.setUniform(lookat, "wLookAt");
+        gpuProgram.setUniform(right, "wRight");
+        gpuProgram.setUniform(up, "wUp");
+    }
+} camera;
+
+class Shape {
+protected:
+    mat4 matrix;
+
+    vec3 position;
+    vec3 direction;
+
+    mat4 calculateTranslationMatrix() {
+        return {
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 1, 0,
+                position.x, position.y, position.z, 1
+        };
+    }
+    mat4 calculateRotationMatrix() {
+        vec3 direction2; // meroleges
+        vec3 direction3; // meroleges
+        return {
+                direction2.x, direction2.y, direction2.z, 0,
+                direction3.x, direction3.y, direction3.z, 0,
+                direction.x, direction.y, direction.z, 0,
+                0, 0, 0, 1
+        };
+    }
+    virtual mat4 calculateScaleMatrix() = 0;
+    void calculateMatrix() {
+        matrix = {
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+        };
+        matrix = matrix * calculateTranslationMatrix();
+        matrix = matrix * calculateRotationMatrix();
+        matrix = matrix * calculateScaleMatrix();
+    }
+
+public:
+    virtual void setUniform() = 0;
+    void recalculate() {
+        calculateMatrix();
+        setUniform();
+    }
+};
+
+class Cylinder : Shape {
+    float r1, r2;
+
+    mat4 calculateScaleMatrix() final {
+        return {
+                r1, 0, 0, 0,
+                0, r2, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+        };
+    }
+
+public:
+    void set(vec3 _position, vec3 _direction, float _r1, float _r2) {
+        position = _position;
+        direction = normalize(_direction);
+        r1 = _r1;
+        r2 = _r2;
+        calculateMatrix();
+        setUniform();
+    }
+    void setUniform() final {
+        gpuProgram.setUniform(matrix, "cylinder.matrix");
+    }
+} cylinder;
+
+class Hyperboloid : Shape {
+    float a, b, c;
+
+    mat4 calculateScaleMatrix() final {
+        return {
+                a, 0, 0, 0,
+                0, b, 0, 0,
+                0, 0, c, 0,
+                0, 0, 0, 1
+        };
+    }
+
+public:
+    void set(vec3 _position, vec3 _direction, float _a, float _b, float _c) {
+        position = _position;
+        direction = normalize(_direction);
+        a = _a;
+        b = _b;
+        c = _c;
+    }
+    void setUniform() final {
+        gpuProgram.setUniform(matrix, "hyperboloid.matrix");
+    }
+} hyperboloid;
+
+class FullScreenTexturedQuad {
+    unsigned int vao;
+public:
+    void Create() {
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+
+        unsigned int vbo;
+        glGenBuffers(1, &vbo);
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        float vertexCoords[] = { -1, -1,  1, -1,  1, 1,  -1, 1 };
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertexCoords), vertexCoords, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    }
+
+    void Draw() {
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    }
+} fullScreenTexturedQuad;
 
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
+
+    fullScreenTexturedQuad.Create();
+
+    float fov = 45 * M_PI / 180;
+    camera.set({0, 0, 10}, {0, 0, 0}, {0, 1, 0}, fov);
+    camera.setUniform();
 
     std::ifstream t("vertexShader.glsl");
     std::string vertexShader;
@@ -98,15 +245,7 @@ void onDisplay() {
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    float MVPtransf[4][4] = {1, 0, 0, 0,
-                             0, 1, 0, 0,
-                             0, 0, 1, 0,
-                             0, 0, 0, 1};
-
-    int location = glGetUniformLocation(gpuProgram.getId(), "MVP");
-    glUniformMatrix4fv(
-            location, 1, GL_TRUE, &MVPtransf[0][0]
-    );
+    fullScreenTexturedQuad.Draw();
 
     glutSwapBuffers();
 }
