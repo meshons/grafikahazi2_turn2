@@ -85,6 +85,12 @@ public:
         gpuProgram.setUniform(right, "wRight");
         gpuProgram.setUniform(up, "wUp");
     }
+    void Animate(float dt) {
+        eye = vec3((eye.x - lookat.x) * cos(dt) + (eye.z - lookat.z) * sin(dt) + lookat.x,
+                   eye.y,
+                   -(eye.x - lookat.x) * sin(dt) + (eye.z - lookat.z) * cos(dt) + lookat.z);
+        set(eye, lookat, up, fov);
+    }
 } camera;
 
 class Shape {
@@ -95,22 +101,10 @@ protected:
     vec3 direction;
 
     mat4 calculateTranslationMatrix() {
-        return {
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 1, 0,
-                position.x, position.y, position.z, 1
-        };
+        return TranslateMatrix(position);
     }
     mat4 calculateRotationMatrix() {
-        vec3 direction2; // meroleges
-        vec3 direction3; // meroleges
-        return {
-                direction2.x, direction2.y, direction2.z, 0,
-                direction3.x, direction3.y, direction3.z, 0,
-                direction.x, direction.y, direction.z, 0,
-                0, 0, 0, 1
-        };
+        return RotationMatrix(1.2, direction);
     }
     virtual mat4 calculateScaleMatrix() = 0;
     void calculateMatrix() {
@@ -120,16 +114,14 @@ protected:
                 0, 0, 1, 0,
                 0, 0, 0, 1
         };
-        matrix = matrix * calculateTranslationMatrix();
-        matrix = matrix * calculateRotationMatrix();
         matrix = matrix * calculateScaleMatrix();
+        matrix = matrix * calculateRotationMatrix();
+        matrix = matrix * calculateTranslationMatrix();
     }
-
 public:
     virtual void setUniform() = 0;
-    void recalculate() {
-        calculateMatrix();
-        setUniform();
+    mat4 getMatrix() {
+        return  matrix;
     }
 };
 
@@ -137,12 +129,7 @@ class Cylinder : Shape {
     float r1, r2;
 
     mat4 calculateScaleMatrix() final {
-        return {
-                r1, 0, 0, 0,
-                0, r2, 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1
-        };
+        return ScaleMatrix({r1, r2, 1});
     }
 
 public:
@@ -163,12 +150,7 @@ class Hyperboloid : Shape {
     float a, b, c;
 
     mat4 calculateScaleMatrix() final {
-        return {
-                a, 0, 0, 0,
-                0, b, 0, 0,
-                0, 0, c, 0,
-                0, 0, 0, 1
-        };
+        return ScaleMatrix({a, b, c});
     }
 
 public:
@@ -178,11 +160,48 @@ public:
         a = _a;
         b = _b;
         c = _c;
+        calculateMatrix();
+        setUniform();
     }
     void setUniform() final {
         gpuProgram.setUniform(matrix, "hyperboloid.matrix");
     }
 } hyperboloid;
+
+class BezierCurve {
+    std::vector<vec2> cps;
+    std::vector<vec3> lights;
+
+    float B(int i, float t) {
+        int n = cps.size() - 1;
+        float choose = 1;
+        for (int j = 1; j <= i; ++j) choose *= (float)(n-j+1)/(float)j;
+        return choose * (float)pow(t, i) * (float)pow(1-t, n-i);
+    }
+
+public:
+    void AddControlPoint(vec2 cp) { cps.push_back(cp); }
+
+    void create() {
+        AddControlPoint({-0.1, -0.5});
+        AddControlPoint({-0.2, 0.5});
+        AddControlPoint({0.2, 0.5});
+        AddControlPoint({0.1, -0.5});
+
+        lights.resize(100);
+
+        for (int i = 0; i < 100; ++i) {
+            vec2 light = r((float)i/100);
+            
+        }
+    }
+
+    vec2 r(float t) {
+        vec2 rr{0, 0};
+        for (int i = 0; i < cps.size(); ++i) rr = rr + cps[i] * B(i, t);
+        return rr;
+    }
+} bezierCurve;
 
 class FullScreenTexturedQuad {
     unsigned int vao;
@@ -210,13 +229,7 @@ public:
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
 
-    fullScreenTexturedQuad.Create();
-
-    float fov = 45 * M_PI / 180;
-    camera.set({0, 0, 10}, {0, 0, 0}, {0, 1, 0}, fov);
-    camera.setUniform();
-
-    std::ifstream t("vertexShader.glsl");
+    std::ifstream t("../vertexShader.glsl");
     std::string vertexShader;
 
     t.seekg(0, std::ios::end);
@@ -224,9 +237,9 @@ void onInitialization() {
     t.seekg(0, std::ios::beg);
 
     vertexShader.assign((std::istreambuf_iterator<char>(t)),
-               std::istreambuf_iterator<char>());
+                        std::istreambuf_iterator<char>());
 
-    std::ifstream t2("vertexShader.glsl");
+    std::ifstream t2("../fragmentShader.glsl");
     std::string fragmentShader;
 
     t2.seekg(0, std::ios::end);
@@ -234,11 +247,29 @@ void onInitialization() {
     t2.seekg(0, std::ios::beg);
 
     fragmentShader.assign((std::istreambuf_iterator<char>(t2)),
-                        std::istreambuf_iterator<char>());
+                          std::istreambuf_iterator<char>());
 
-    gpuProgram.create(vertexShader.c_str(), fragmentShader.c_str(), "outColor");
+    gpuProgram.create(vertexShader.c_str(), fragmentShader.c_str(), "fragmentColor");
     // TODO change in prod
     //gpuProgram.create(vertexSource, fragmentSource, "outColor");
+
+    fullScreenTexturedQuad.Create();
+
+    float fov = 45 * M_PI / 180;
+    camera.set({10, 0, 0}, {0, 0, 0}, {0, 1, 0}, fov);
+    camera.setUniform();
+
+    cylinder.set(
+            { -0.8, -0.1, -5},
+            { 0.8, 0.4, 0.3 },
+            0.9,
+            1.1
+            );
+    hyperboloid.set(
+            { -0.1, 0.05, 0.1 },
+            { -0.5, -0.4, 0.6 },
+            0.5, 0.5, 1.05
+            );
 }
 
 void onDisplay() {
@@ -246,6 +277,7 @@ void onDisplay() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     fullScreenTexturedQuad.Draw();
+    camera.setUniform();
 
     glutSwapBuffers();
 }
@@ -269,5 +301,6 @@ void onMouse(
 }
 
 void onIdle() {
+    //camera.Animate(0.0001f);
     glutPostRedisplay();
 }

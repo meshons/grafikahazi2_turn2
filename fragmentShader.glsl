@@ -16,12 +16,19 @@ struct Ray {
 
 struct Cylinder {
     mat4 matrix;
-    mat4 inverseMatrix;
 };
 
 struct Hyperboloid {
     mat4 matrix;
-    mat4 inverseMatrix;
+};
+
+struct Light526 {
+    vec3 position;
+    float intensify;
+};
+
+struct WhiteLight {
+    vec3 position;
 };
 
 uniform vec3 wEye;
@@ -29,40 +36,44 @@ uniform vec3 wEye;
 uniform Cylinder cylinder;
 uniform Hyperboloid hyperboloid;
 
+uniform Light526[100] lights;
+uniform WhiteLight whiteLight;
+
 Hit intersectCylinder(const Ray ray) {
     Hit hit;
     hit.t = -1;
     hit.hyperboloid = false;
 
-    Ray transformedRay = (ray.start * cylinder.inverseMatrix, ray.dir * cylinder.inverseMatrix);
+    mat4 inverseMatrix = inverse(cylinder.matrix);
 
-    // https://github.com/spinatelli/raytracer/blob/master/Cylinder.cpp
-    float a = transformedRay.dir.x * transformedRay.dir.x + transformedRay.dir.z * transformedRay.dir.z;
-    float b = transformedRay.dir.x + transformedRay.dir.z;
-    float c = -1;
+    Ray transformedRay = Ray(ray.start * cylinder.matrix, ray.dir * cylinder.matrix);
 
-    float delta = b * b - a * c;
+    float a = transformedRay.dir.x * transformedRay.dir.x + transformedRay.dir.y * transformedRay.dir.y;
+    float b = 2 * (transformedRay.start.x * transformedRay.dir.x + transformedRay.start.y * transformedRay.dir.y);
+    float c = transformedRay.start.x * transformedRay.start.x + transformedRay.start.y * transformedRay.start.y - 1;
+
+    float delta = b * b - 4 * a * c;
     if (delta < 0)
         return hit;
 
-    float t1 = (-b + sqrt(delta)) / a;
-    float t2 = (-b - sqrt(delta)) / a;
+    float t1 = (-b + sqrt(delta)) / 2 / a;
+    float t2 = (-b - sqrt(delta)) / 2 / a;
 
     if (t1 < 0 && t2 < 0)
         return hit;
-    if (t1 > 0 && t2 < 0)
+    if (t1 >= 0 && t2 < 0)
         hit.t = t1;
-    else if (t1 < 0 && t2 > 0)
+    else if (t1 < 0 && t2 >= 0)
         hit.t = t2;
     else
         hit.t = (t2 < t1) ? t2 : t1;
 
     hit.position = transformedRay.start + transformedRay.dir * hit.t;
-    hit.normal = (hit.position.x, hit.position.y, 0);
+    hit.normal = vec4(hit.position.x, hit.position.y, 0, 1);
 
     float lengthOfRay = distance(hit.position, transformedRay.start);
-    hit.position = hit.position * cylinder.matrix;
-    hit.normal = hit.normal * cylinder.matrix;
+    hit.position = hit.position * inverseMatrix;
+    hit.normal = hit.normal * inverseMatrix;
     float lengthOfRay2 = distance(hit.position, ray.start);
     hit.t = hit.t / lengthOfRay * lengthOfRay2;
 
@@ -74,40 +85,51 @@ Hit intersectHyperboloid(const Ray ray) {
     hit.t = -1;
     hit.hyperboloid = true;
 
-    Ray transformedRay = (ray.start * hyperboloid.inverseMatrix, ray.dir * hyperboloid.inverseMatrix);
-    float x0 = transformedRay.start.x, y0 = transformedRay.start.y, z0 = transformedRay.start.z;
-    float normalizeToA = 1 / transformedRay.dir.x;
-    float k = transformedRay.dir.y * normalizeToA;
-    float l = transformedRay.dir.z * normalizeToA;
+    mat4 inverseMatrix = inverse(hyperboloid.matrix);
 
-    vec4 p1, p2;
+    Ray transformedRay = Ray(ray.start * hyperboloid.matrix, ray.dir * hyperboloid.matrix);
 
-    // https://johannesbuchner.github.io/intersection/intersection_line_hyperboloid.html
-    float sqrtx1 = -pow(l, 2) + pow(k, 2) + pow(k, 2)*pow(z0, 2) - 2*k*l*y0*z0 + pow(l, 2)*pow(y0, 2) + 1
-    + pow(l, 2)*pow(x0, 2) - 2*l*x0*z0 + pow(z0, 2) - pow(k, 2)*pow(x0, 2) + 2*k*x0*y0 - pow(y0, 2);
-    if (sqrtx1 >=  0) {
-        p1.x = x0 + (l*z0 - k*y0 - x0 + sqrt(sqrtx1))/(-pow(l, 2) + pow(k, 2) + 1);
-        p1.y = k * (l*z0 - k*y0 - x0 + sqrt(sqrtx1))/(-pow(l, 2) + pow(k, 2) + 1) + y0;
-        p1.z = l * (l*z0 - k*y0 - x0 + sqrt(sqrtx1))/(-pow(l, 2) + pow(k, 2) + 1) + z0;
+    float a = transformedRay.dir.x * transformedRay.dir.x
+                + transformedRay.dir.y * transformedRay.dir.y
+                - transformedRay.dir.z * transformedRay.dir.z;
+    float b = 2 * (
+                transformedRay.start.x * transformedRay.dir.x
+                + transformedRay.start.y * transformedRay.dir.y
+                - transformedRay.start.z * transformedRay.dir.z
+    );
+    float c = transformedRay.start.x * transformedRay.start.x
+                + transformedRay.start.y * transformedRay.start.y
+                - transformedRay.start.z * transformedRay.start.z
+                - 1;
 
-        p2.x = x0 + (-l*z0 + k*y0 + x0 + sqrt(sqrtx1))/(pow(l, 2) - pow(k, 2) - 1);
-        p2.y = k*(-l*z0 + k*y0 + x0 + sqrt(sqrtx1))/(pow(l, 2) - pow(k, 2) - 1) + y0;
-        p2.z = l*(-l*z0 + k*y0 + x0 + sqrt(sqrtx1))/(pow(l, 2) - pow(k, 2) - 1) + z0;
-    } else
+    float delta = b * b - 4 * a * c;
+    if (delta < 0)
         return hit;
 
-    hit.position = distance(p1, transformedRay.start) < distance(p2, transformedRay.start) ? p1 : p2;
-    hit.t = distance(hit.position, transformedRay.start);
+    float t1 = (-b + sqrt(delta)) / 2 / a;
+    float t2 = (-b - sqrt(delta)) / 2 / a;
 
-    hit.normal = (
+    if (t1 < 0 && t2 < 0)
+        return hit;
+    if (t1 >= 0 && t2 < 0)
+        hit.t = t1;
+    else if (t1 < 0 && t2 >= 0)
+        hit.t = t2;
+    else
+        hit.t = (t2 < t1) ? t2 : t1;
+
+    hit.position = transformedRay.start + transformedRay.dir * hit.t;
+
+    hit.normal = vec4(
         2 * hit.position.x + hit.position.y * hit.position.y - hit.position.z * hit.position.z,
         hit.position.x * hit.position.x + 2 * hit.position.y - hit.position.z * hit.position.z,
-        hit.position.x * hit.position.x + hit.position.y * hit.position.y - 2 * hit.position.z
+        hit.position.x * hit.position.x + hit.position.y * hit.position.y - 2 * hit.position.z,
+        1
     );
 
     float lengthOfRay = distance(hit.position, transformedRay.start);
-    hit.position = hit.position * hyperboloid.matrix;
-    hit.normal = hit.normal * hyperboloid.matrix;
+    hit.position = hit.position * inverseMatrix;
+    hit.normal = hit.normal * inverseMatrix;
     float lengthOfRay2 = distance(hit.position, ray.start);
     hit.t = hit.t / lengthOfRay * lengthOfRay2;
 
@@ -117,12 +139,20 @@ Hit intersectHyperboloid(const Ray ray) {
 Hit firstIntersect(Ray ray) {
     Hit bestHit;
     bestHit.t = -1;
+    bool find = false;
 
-    Hit hit = intersectHyperboloid(ray);
-    if (hit.t > bestHit.t)
+    Hit hit = intersectCylinder(ray);
+    if (hit.t >= 0 && !find){
         bestHit = hit;
-    hit = intersectCylinder(ray);
-    if (hit.t > bestHit.t)
+        find = true;
+    } else if (hit.t >= 0 && find && hit.t < bestHit.t)
+        bestHit = hit;
+
+    hit = intersectHyperboloid(ray);
+    if (hit.t >= 0 && !find) {
+        bestHit = hit;
+        find = true;
+    } else if (hit.t >= 0 && find && hit.t < bestHit.t)
         bestHit = hit;
 
     if (dot(ray.dir, bestHit.normal) > 0) bestHit.normal = bestHit.normal * (-1);
@@ -148,20 +178,18 @@ vec3 trace(Ray ray) {
     for(int d = 0; d < maxdepth; d++) {
         Hit hit = firstIntersect(ray);
         if (hit.t < 0)
-            return (1, 0, 0);
+            return vec3(1, 0, 0);
         else if (hit.hyperboloid)
-            return (0, 0, 1);
+            return vec3(0, 0, 1);
         else
-            return (0, 1, 0);
+            return vec3(0, 1, 0);
     }
     return outRadiance;
 }
 
 void main() {
-    cylinder.inverseMatrix = inverse(cylinder.matrix);
-    hyperboloid.inverseMatrix = inverse(hyperboloid.matrix);
     Ray ray;
-    ray.start = (wEye, 0);
-    ray.dir = (normalize(p - wEye), 0);
+    ray.start = vec4(wEye, 1);
+    ray.dir = vec4(normalize(p - wEye), 1);
     fragmentColor = vec4(trace(ray), 1);
 }
