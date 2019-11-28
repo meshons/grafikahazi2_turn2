@@ -274,9 +274,9 @@ class LightMaker
 public:
 
     void create() {
-        AddControlPoint({-2, -6});
+        AddControlPoint({-1, -6});
         AddControlPoint({0, 17});
-        AddControlPoint({2, -6});
+        AddControlPoint({1, -6});
 
         lights.reserve(100);
 
@@ -387,8 +387,6 @@ void onInitialization() {
             {-2.8125, -0.5, -0.5}, 1.1, 1.1, 1.1
     );
 
-    // distance 2
-
     vec3 rotation = {1,0,0};
     cylinder.rotate(rotation, 0.25);
     hyperboloid.rotate(rotation, 0.25);
@@ -400,7 +398,6 @@ void onInitialization() {
     hyperboloid.rotate(rotation3, 0.02);
 
     vec3 position = {3, 0, -0.1};
-    //vec3 position = {0, 0, 0};
     cylinder.translate(position);
     hyperboloid.translate(position);
 
@@ -437,6 +434,5 @@ void onMouse(
 }
 
 void onIdle() {
-    //camera.Animate(0.001f);
     glutPostRedisplay();
 }
