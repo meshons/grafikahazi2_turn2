@@ -28,6 +28,8 @@ struct Hyperboloid {
 };
 
 struct Light526 {
+    // rgb(78,255, 0)
+    // Hex: #4eff00
     vec3 position;
     float intensify;
 };
@@ -90,6 +92,7 @@ Hit intersectCylinder(const Ray ray) {
         2 * hit.position.y,
         0
     ));
+
     float lengthOfRay = distance(hit.position, transformedRay.start);
     hit.position = vec3(vec4(hit.position, 1) * cylinder.matrix);
     hit.normal = normalize(vec3(vec4(hit.normal, 1) * cylinder.matrix));
@@ -180,30 +183,21 @@ Hit firstIntersect(Ray ray) {
 
 const float epsilon = 0.0001f;
 
-bool shadowIntersect(Ray ray, int mat) {
-    if (mat == 1 && intersectCylinder(ray).t > 0 + epsilon * 5) return true;
-    if (mat == 0 && intersectHyperboloid(ray).t > 0 + epsilon * 5) return true;
-    return false;
-}
-
 vec3 Fresnel(vec3 F0, float cosTheta) {
     return F0 + (vec3(1, 1, 1) - F0) * pow(cosTheta, 5);
 }
 
 vec3 trace(Ray ray) {
-    vec3 weight = vec3(0.3, 0.3, 0.3);
+    vec3 weight = vec3(1, 1, 1);
     vec3 outRadiance = vec3(0, 0, 0);
 
     Hit hit = firstIntersect(ray);
     if (hit.t < 0) return outRadiance;
     int mat = hit.hyperboloid ? 1 : 0;
-    outRadiance += weight * materials[mat].ka;
-    Ray shadowRay;
-    shadowRay.start = hit.position + hit.normal * epsilon;
+    outRadiance += weight * 1.2 * materials[mat].ka;
     vec3 lightDirection = normalize(whiteLight.position - hit.position);
-    shadowRay.dir = lightDirection;
     float cosTheta = dot(hit.normal, lightDirection);
-    if (cosTheta > 0 && !shadowIntersect(shadowRay, mat)) {
+    if (cosTheta > 0) {
         outRadiance += weight * materials[mat].kd * cosTheta;
         vec3 halfway = normalize(-ray.dir + lightDirection);
         float cosDelta = dot(hit.normal, halfway);

@@ -113,7 +113,6 @@ public:
         gpuProgram.setUniform(ks, buffer);
         sprintf(buffer, "materials[%d].shininess", mat);
         gpuProgram.setUniform(shininess, buffer);
-        sprintf(buffer, "materials[%d].F0", mat);
     }
 };
 
@@ -168,7 +167,7 @@ public:
     }
 };
 
-class Cylinder : Shape
+class Cylinder : public Shape
 {
     float r1, r2;
 
@@ -178,7 +177,7 @@ class Cylinder : Shape
 
 public:
     Cylinder() : Shape(
-            {0, {0.5, 0, 0}, {0.1, 0.1, 0.1}, 2}
+            {0, {0.1, 0, 0}, {0.1, 0.1, 0.1}, 2}
     ) {
         r1 = 0;
         r2 = 0;
@@ -200,7 +199,7 @@ public:
     }
 } cylinder;
 
-class Hyperboloid : Shape
+class Hyperboloid : public Shape
 {
     float a, b, c;
 
@@ -275,16 +274,18 @@ public:
 
         lights.reserve(100);
 
-        for (int i = 1; i < 200; ++ ++i) {
+        for (int i = 1; i < 200; ++++i) {
             vec2 light = r((float) i / 100);
             float angle = light.x * (float) M_PI * 2;
-            vec3 light3d = {sinf(angle), cosf(angle), light.y};
+            vec4 light4d = {sinf(angle), cosf(angle), light.y, 1};
+            light4d = light4d * cylinder.getMatrix();
+            vec3 light3d = {light4d.x, light4d.y, light4d.z};
             lights.push_back({light3d, 1.0});
         }
 
         lights.shrink_to_fit();
 
-        whiteLight = {5, 0, -1};
+        whiteLight = {15, 0, 0};
         setUniform();
     }
 
@@ -357,11 +358,11 @@ void onInitialization() {
     fullScreenTexturedQuad.Create();
 
     float fov = 70 * M_PI / 180;
-    camera.set({5, 0, 0}, {0, 0, 0}, {0, 1, 0}, fov);
+    camera.set({15, 0, 0}, {0, 0, 0}, {0, 1, 0}, fov);
     camera.setUniform();
 
     cylinder.set(
-            {1.3, -0.3, 0}, {1, 1, 1}, 0.1, 0.1, 0.25
+            {1.3, -0.3, 0}, {1, 1, 1}, 0.5, 0.5, 0.25
     );
     hyperboloid.set(
             {-0.2, 0.1, 0}, {1, 1, 1}, 2.5, 2, 3, 1.25
