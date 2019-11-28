@@ -132,10 +132,9 @@ class Shape
 {
 protected:
     mat4 matrix;
+    mat4 rotationMatrix;
 
     vec3 position;
-    float angle;
-    vec3 direction;
 
     RoughMaterial mat;
 
@@ -143,24 +142,37 @@ protected:
         return TranslateMatrix(position);
     }
 
-    mat4 calculateRotationMatrix() {
-        return RotationMatrix(M_PI * angle, direction);
-    }
-
     virtual mat4 calculateScaleMatrix() = 0;
 
     void calculateMatrix() {
         matrix = matrix * calculateScaleMatrix();
-        matrix = matrix * calculateRotationMatrix();
+        matrix = matrix * rotationMatrix;
         matrix = matrix * calculateTranslationMatrix();
     }
 
 public:
-    Shape(RoughMaterial && _mat) : mat{_mat}, position{0, 0, 0}, direction{1, 0, 0} {
+    Shape(RoughMaterial && _mat) : mat{_mat}, position{0, 0, 0}{
         matrix = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        rotationMatrix = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     }
 
     virtual void setUniform() = 0;
+
+    void rotateBeforeSet(vec3 dir, float angle) {
+        rotationMatrix = rotationMatrix * RotationMatrix(M_PI * angle, dir);
+    }
+
+    void rotate(vec3 dir, float angle) {
+        matrix = matrix * RotationMatrix(M_PI * angle, dir);
+    }
+
+    void translate(vec3 _position) {
+        matrix = matrix * TranslateMatrix(_position);
+    }
+
+    void upload() {
+        setUniform();
+    }
 
     mat4 getMatrix() {
         return matrix;
@@ -177,20 +189,17 @@ class Cylinder : public Shape
 
 public:
     Cylinder() : Shape(
-            {0, {0.1, 0, 0}, {0.1, 0.1, 0.1}, 2}
+            {0, {0.1, 0.05, 0.03}, {0.1, 0.1, 0.1}, 100}
     ) {
         r1 = 0;
         r2 = 0;
     }
 
-    void set(vec3 _position, vec3 _direction, float _r1, float _r2, float _angle) {
+    void set(vec3 _position, float _r1, float _r2) {
         position = _position;
-        direction = normalize(_direction);
         r1 = _r1;
         r2 = _r2;
-        angle = _angle;
         calculateMatrix();
-        setUniform();
     }
 
     void setUniform() final {
@@ -216,15 +225,12 @@ public:
         c = 0;
     }
 
-    void set(vec3 _position, vec3 _direction, float _a, float _b, float _c, float _angle) {
+    void set(vec3 _position, float _a, float _b, float _c) {
         position = _position;
-        direction = normalize(_direction);
         a = _a;
         b = _b;
         c = _c;
-        angle = _angle;
         calculateMatrix();
-        setUniform();
     }
 
     void setUniform() final {
@@ -239,6 +245,7 @@ class LightMaker
     {
         vec3 light;
         float intensify;
+        float distance;
     };
 
     std::vector<vec2> cps;
@@ -261,26 +268,37 @@ class LightMaker
     }
 
     void AddControlPoint(vec2 cp) {
-        cps.push_back(cp);
+        cps.emplace_back(cp.y, cp.x);
     }
 
 public:
 
     void create() {
-        AddControlPoint({-0.1, -0.5});
-        AddControlPoint({-0.2, 0.5});
-        AddControlPoint({0.2, 0.5});
-        AddControlPoint({0.1, -0.5});
+        AddControlPoint({-2, -6});
+        AddControlPoint({0, 17});
+        AddControlPoint({2, -6});
 
         lights.reserve(100);
 
+        int j = 0;
+        float average = 0;
+
         for (int i = 1; i < 200; ++++i) {
-            vec2 light = r((float) i / 100);
-            float angle = light.x * (float) M_PI * 2;
-            vec4 light4d = {sinf(angle), cosf(angle), light.y, 1};
+            vec2 light = r((float) i / 200);
+            vec2 lightBefore = r((float) (i-1) / 200);
+            vec2 lightAfter = r((float) (i+1) / 200);
+            float distance = length(light-lightBefore) + length(lightAfter-light);
+            average = (average + distance) / (float)++j;
+
+            float angle = light.x * (float)M_PI / 4;
+            vec4 light4d = {-cosf(angle), sinf(angle), light.y, 1};
             light4d = light4d * cylinder.getMatrix();
             vec3 light3d = {light4d.x, light4d.y, light4d.z};
-            lights.push_back({light3d, 1.0});
+            lights.push_back({light3d, 1.0, distance});
+        }
+
+        for (auto & light : lights) {
+            light.intensify = light.distance / average;
         }
 
         lights.shrink_to_fit();
@@ -357,16 +375,37 @@ void onInitialization() {
 
     fullScreenTexturedQuad.Create();
 
-    float fov = 70 * M_PI / 180;
-    camera.set({15, 0, 0}, {0, 0, 0}, {0, 1, 0}, fov);
+    float fov = 45 * M_PI / 180;
+    camera.set({30, 0, 0}, {2, 0, 0}, {0, 1, 0}, fov);
     camera.setUniform();
 
     cylinder.set(
-            {1.3, -0.3, 0}, {1, 1, 1}, 0.5, 0.5, 0.25
+            {1.8125, 0, 0}, 1, 1
     );
+    hyperboloid.rotateBeforeSet({1,0,0}, 0.5);
     hyperboloid.set(
-            {-0.2, 0.1, 0}, {1, 1, 1}, 2.5, 2, 3, 1.25
+            {-2.8125, -0.5, -0.5}, 1.1, 1.1, 1.1
     );
+
+    // distance 2
+
+    vec3 rotation = {1,0,0};
+    cylinder.rotate(rotation, 0.25);
+    hyperboloid.rotate(rotation, 0.25);
+    vec3 rotation2 = {0,1,0};
+    cylinder.rotate(rotation2, 0.08);
+    hyperboloid.rotate(rotation2, 0.08);
+    vec3 rotation3 = {0,0,1};
+    cylinder.rotate(rotation3, 0.02);
+    hyperboloid.rotate(rotation3, 0.02);
+
+    vec3 position = {3, 0, -0.1};
+    //vec3 position = {0, 0, 0};
+    cylinder.translate(position);
+    hyperboloid.translate(position);
+
+    cylinder.upload();
+    hyperboloid.upload();
 
     lightMaker.create();
 }
@@ -398,6 +437,6 @@ void onMouse(
 }
 
 void onIdle() {
-    //camera.Animate(0.0001f);
+    //camera.Animate(0.001f);
     glutPostRedisplay();
 }
