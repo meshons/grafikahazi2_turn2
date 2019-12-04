@@ -33,35 +33,195 @@
 //=============================================================================================
 #include "framework.h"
 
-// TODO delete on prod
-#include <string>
-#include <fstream>
-#include <streambuf>
-
 const char * const vertexSource = R"(
-	#version 330				// Shader 3.3
-	precision highp float;		// normal floats, makes no difference on desktop computers
+	#version 330
+    precision highp float;
 
-	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
-    uniform float scale;        // scale
-    uniform float translateX;   // x translate
-	layout(location = 0) in vec2 vp;	// Varying input: vp = vertex position is expected in attrib array 0
+    uniform vec3 wLookAt, wRight, wUp;
 
-	void main() {
-		gl_Position = vec4(vp.x * scale - translateX, vp.y * scale, 0, 1) * MVP;
-	}
+    layout(location = 0) in vec2 cCamWindowVertex;
+    out vec3 p;
+
+    void main() {
+        gl_Position = vec4(cCamWindowVertex, 0, 1);
+        p = wLookAt + wRight * cCamWindowVertex.x + wUp * cCamWindowVertex.y;
+    }
 )";
 
 const char * const fragmentSource = R"(
-	#version 330			// Shader 3.3
-	precision highp float;	// normal floats, makes no difference on desktop computers
-	
-	uniform vec3 color;		// uniform variable, the color of the primitive
-	out vec4 outColor;		// computed color of the current pixel
+	#version 330
+    precision highp float;
 
-	void main() {
-		outColor = vec4(color, 1);	// computed color is the color of the primitive
-	}
+    #define M_PI 3.1415926535897932384626433832795
+
+    in  vec3 p;
+    out vec4 fragmentColor;
+
+    struct Material {
+        vec3 ka, kd, ks;
+        float  shininess;
+    };
+
+    struct Hit {
+        float t;
+        vec3 position, normal;
+        bool hyperboloid;
+    };
+
+    struct Ray {
+        vec3 start, dir;
+    };
+
+    struct Hyperboloid {
+        mat4 matrix;
+    };
+
+    const vec3 light526nm = vec3(0.305882352941, 1, 0);
+    const float epsilon = 1;
+
+    struct Light526 {
+        // rgb(78,255, 0)
+        // Hex: #4eff00
+        vec3 position;
+        float intensify;
+    };
+
+    struct WhiteLight {
+        vec3 position;
+    };
+
+    uniform vec3 wEye;
+
+    uniform Hyperboloid hyperboloid;
+
+    const int nMaxLights = 100;
+
+    uniform Light526 lights[nMaxLights];
+    uniform WhiteLight whiteLight;
+
+    uniform Material materials[2];
+
+    Hit intersectHyperboloid(const Ray ray) {
+        Hit hit;
+        hit.t = -1;
+        hit.hyperboloid = true;
+
+        mat4 inverseMatrix = inverse(hyperboloid.matrix);
+
+        Ray transformedRay = Ray(
+            vec3(vec4(ray.start, 1) * inverseMatrix),
+            vec3(vec4(ray.dir, 1) * inverseMatrix)
+        );
+        float a = transformedRay.dir.x * transformedRay.dir.x
+                    + transformedRay.dir.y * transformedRay.dir.y
+                    - transformedRay.dir.z * transformedRay.dir.z;
+        float b = 2 * (
+                    transformedRay.start.x * transformedRay.dir.x
+                    + transformedRay.start.y * transformedRay.dir.y
+                    - transformedRay.start.z * transformedRay.dir.z);
+        float c = transformedRay.start.x * transformedRay.start.x
+                    + transformedRay.start.y * transformedRay.start.y
+                    - transformedRay.start.z * transformedRay.start.z
+                    - 1;
+
+        float delta = b * b - 4 * a * c;
+        if (delta < 0)
+        return hit;
+
+        float t1 = (-b + sqrt(delta)) / 2 / a;
+        float t2 = (-b - sqrt(delta)) / 2 / a;
+
+        if (t1 < 0 && t2 < 0)
+        return hit;
+        if (t1 >= 0 && t2 < 0)
+        hit.t = t1;
+        else if (t1 < 0 && t2 >= 0)
+        hit.t = t2;
+        else
+        hit.t = (t2 < t1) ? t2 : t1;
+
+        hit.position = transformedRay.start + transformedRay.dir * hit.t;
+
+        hit.normal = normalize(vec3(
+            2 * hit.position.x,
+            2 * hit.position.y,
+            -2 * hit.position.z
+        ));
+
+        float lengthOfRay = distance(hit.position, transformedRay.start);
+        hit.position = vec3(vec4(hit.position, 1) * hyperboloid.matrix);
+        hit.normal = normalize(vec3(vec4(hit.normal, 1) * hyperboloid.matrix));
+        float lengthOfRay2 = distance(hit.position, ray.start);
+        hit.t = hit.t / lengthOfRay * lengthOfRay2;
+
+        return hit;
+    }
+
+    Hit firstIntersect(Ray ray) {
+        Hit bestHit;
+        bestHit.t = -1;
+        bool find = false;
+
+        Hit hit = intersectHyperboloid(ray);
+        if (hit.t >= 0 && !find){
+            bestHit = hit;
+            find = true;
+        } else if (hit.t >= 0 && find && hit.t < bestHit.t)
+            bestHit = hit;
+
+
+        if (dot(ray.dir, bestHit.normal) > 0) bestHit.normal = bestHit.normal * (-1);
+        return bestHit;
+    }
+
+    const float conversion = 500;
+    const float lambda = 526;
+    const float c = 299792458;
+    const float f = c / lambda;
+    const float omega = f * 2 * M_PI;
+    const float alpha = conversion * lambda * 2 * M_PI * pow(10, -9);
+    const float k = 2 * M_PI / lambda;
+
+    vec3 Fresnel(vec3 F0, float cosTheta) {
+        return F0 + (vec3(1, 1, 1) - F0) * pow(cosTheta, 5);
+    }
+
+    vec3 trace(Ray ray) {
+        vec3 weight = vec3(1, 1, 1);
+        vec3 outRadiance = vec3(0, 0, 0);
+
+        Hit hit = firstIntersect(ray);
+        if (hit.t < 0) return outRadiance;
+        int mat = hit.hyperboloid ? 1 : 0;
+        outRadiance += weight * 1.2 * materials[mat].ka;
+        vec3 lightDirection = normalize(whiteLight.position - hit.position);
+        float cosTheta = dot(hit.normal, lightDirection);
+        if (cosTheta > 0) {
+            outRadiance += weight * materials[mat].kd * cosTheta;
+            vec3 halfway = normalize(-ray.dir + lightDirection);
+            float cosDelta = dot(hit.normal, halfway);
+            if (cosDelta > 0) outRadiance += weight * materials[mat].ks * pow(cosDelta, materials[mat].shininess);
+        }
+
+        if (hit.hyperboloid) {
+            float intensify = 0;
+            for (int i = 0; i < nMaxLights; i++) {
+                float d = distance(hit.position, lights[i].position) * conversion;
+                intensify += sqrt(lights[i].intensify) * 15 / d *
+                    cos(lambda * d * 2 * M_PI * pow(10, -18) - k * d + alpha);
+            }
+            outRadiance += intensify * intensify * light526nm;
+        }
+
+        return outRadiance;
+    }
+
+    void main() {
+        Ray ray;
+        ray.start = wEye;
+        ray.dir = normalize(p - wEye);
+        fragmentColor = vec4(trace(ray), 1);
+    }
 )";
 
 GPUProgram gpuProgram;
@@ -203,8 +363,6 @@ public:
     }
 
     void setUniform() final {
-        gpuProgram.setUniform(matrix, "cylinder.matrix");
-        mat.setUniform();
     }
 } cylinder;
 
@@ -351,27 +509,7 @@ public:
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
 
-    std::ifstream t("../vertexShader.glsl");
-    std::string vertexShader;
-
-    t.seekg(0, std::ios::end);
-    vertexShader.reserve(t.tellg());
-    t.seekg(0, std::ios::beg);
-
-    vertexShader.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-
-    std::ifstream t2("../fragmentShader.glsl");
-    std::string fragmentShader;
-
-    t2.seekg(0, std::ios::end);
-    fragmentShader.reserve(t2.tellg());
-    t2.seekg(0, std::ios::beg);
-
-    fragmentShader.assign((std::istreambuf_iterator<char>(t2)), std::istreambuf_iterator<char>());
-
-    gpuProgram.create(vertexShader.c_str(), fragmentShader.c_str(), "fragmentColor");
-    // TODO change in prod
-    //gpuProgram.create(vertexSource, fragmentSource, "outColor");
+    gpuProgram.create(vertexSource, fragmentSource, "outColor");
 
     fullScreenTexturedQuad.Create();
 
